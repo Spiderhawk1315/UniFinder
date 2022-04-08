@@ -1,3 +1,4 @@
+# Imports
 import csv
 from neo4j import GraphDatabase
 
@@ -5,7 +6,7 @@ from neo4j import GraphDatabase
 neoURL = "neo4j+s://2a882d3a.databases.neo4j.io:7687"
 neoUser = "neo4j"
 neoPassword = "cZWVr8MUErrFaJlXy88rKXMkwBAaWrdnkgV6B1-vfHg"
-fileName = "/content/drive/MyDrive/CSCE410_2022S/Final_Projects/Team 3/uni_data.csv"
+fileName = "./uni_data.csv"
 
 class UniFinder:
 
