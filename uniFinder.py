@@ -24,7 +24,8 @@ class UniFinder:
         if (isColumns):
           self.columns = row
           isColumns = False
-        self.data.append(row)
+        else:
+          self.data.append(row)
 
   def add_uni(self, rowIndex):
     with self.driver.session() as session:
@@ -35,10 +36,9 @@ class UniFinder:
     query = "CREATE (x:University { "
     for index, field in enumerate(columns):
       value = data[index]
-      if (index in stringColumns):
+      if (index in UniFinder.stringColumns):
         value = f'"{value}"'
-
-      query += f'{field}: "{data[index]}"'
+      query += f'{field}: {value}'
       if (index < len(columns) - 1):
         query += ", "
     query += " }) RETURN x"
