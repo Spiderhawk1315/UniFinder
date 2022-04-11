@@ -8,6 +8,7 @@ neoPassword = "cZWVr8MUErrFaJlXy88rKXMkwBAaWrdnkgV6B1-vfHg"
 fileName = "uni_data.csv"
 
 class UniFinder:
+  stringColumns = [3, 4, 5, 6]
 
   def __init__(self, uri, user, password):
     self.driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -33,6 +34,10 @@ class UniFinder:
   def _create_and_return_uni(tx, columns, data):
     query = "CREATE (x:University { "
     for index, field in enumerate(columns):
+      value = data[index]
+      if (index in stringColumns):
+        value = f'"{value}"'
+
       query += f'{field}: "{data[index]}"'
       if (index < len(columns) - 1):
         query += ", "
