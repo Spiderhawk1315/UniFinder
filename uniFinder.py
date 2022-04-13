@@ -13,6 +13,7 @@ class UniFinder:
 
   def __init__(self, uri, user, password):
     self.driver = GraphDatabase.driver(uri, auth=(user, password))
+    self.session = self.driver.session()
     self.data = []
     self.columns = []
 
@@ -32,8 +33,7 @@ class UniFinder:
           self.data.append(row)
 
   def add_uni(self, rowIndex):
-    with self.driver.session() as session:
-      uni = session.write_transaction(self._create_and_return_uni, self.columns, self.data[rowIndex])
+    uni = self.session.write_transaction(self._create_and_return_uni, self.columns, self.data[rowIndex])
 
   @staticmethod
   def _create_and_return_uni(tx, columns, data):
@@ -59,6 +59,8 @@ class UniFinder:
     return result.single()
 
   def close(self):
+    # Don't forget to close the session
+    self.session.close()
     # Don't forget to close the driver connection when you are finished with it
     self.driver.close()
 
