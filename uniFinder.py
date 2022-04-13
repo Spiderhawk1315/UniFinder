@@ -1,5 +1,6 @@
 import csv
 from neo4j import GraphDatabase
+from colNames import COL 
 
 # Constants
 neoURL = "neo4j+s://2a882d3a.databases.neo4j.io:7687"
@@ -8,7 +9,7 @@ neoPassword = "cZWVr8MUErrFaJlXy88rKXMkwBAaWrdnkgV6B1-vfHg"
 fileName = "uni_data.csv"
 
 class UniFinder:
-  stringColumns = [3, 4, 5, 6]
+  stringColumns = [COL.INSTNM.value, COL.CITY.value, COL.STABBR.value, COL.ZIP.value]
 
   def __init__(self, uri, user, password):
     self.driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -25,6 +26,9 @@ class UniFinder:
           self.columns = row
           isColumns = False
         else:
+          # Filter out closed universities
+          if (row[COL.CURROPER.value] == '0'):
+            continue
           self.data.append(row)
 
   def add_uni(self, rowIndex):
@@ -36,8 +40,17 @@ class UniFinder:
     query = "CREATE (x:University { "
     for index, field in enumerate(columns):
       value = data[index]
+
+      # Merge NPT4_PUB/NPT4_PRIV into NPT4
+      if (field == COL.NPT4_PUB.name or field == COL.NPT4_PRIV.name):
+        field = "NPT4"
+        if (value == "NULL"):
+          continue
+      
+      # If field has string value it needs wrapped in quotes for Neo4j
       if (index in UniFinder.stringColumns):
         value = f'"{value}"'
+      
       query += f'{field}: {value}'
       if (index < len(columns) - 1):
         query += ", "
