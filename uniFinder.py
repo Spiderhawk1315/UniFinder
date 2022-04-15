@@ -99,13 +99,35 @@ class UniFinder:
 if __name__ == '__main__':
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
   
-  # uniFinder.readData(fileName)
+  uniFinder.readData(fileName)
+
   # for i in range(len(uniFinder.data)):
   #   uniFinder.addUni(i)
 
-  for i in range(22):
-    uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
+  # for i in range(22):
+  #   uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
 
   uniFinder.addRelationship("NPT4Range", "NPT4", "NPT4Rel")
+
+  # rangeCount = 10
+  # rowCount = len(uniFinder.data)
+  # NPT4Values = []
+  # for row in range(rowCount):
+  #   NPT4Value = uniFinder.data[row][COL.NPT4_PUB.value] if uniFinder.data[row][COL.NPT4_PRIV.value] == "NULL" else uniFinder.data[row][COL.NPT4_PRIV.value]
+  #   if (NPT4Value == "NULL"):
+  #     continue
+  #   else:
+  #     NPT4Value = int(NPT4Value)
+  #   NPT4Values.append(NPT4Value)
+  # NPT4Values.sort()
+
+  # numItemsPerRange = int(len(NPT4Values)/rangeCount)
+  # for i in range(rangeCount):
+  #   start = NPT4Values[i * numItemsPerRange]
+  #   if (i == rangeCount-1):
+  #     end = NPT4Values[len(NPT4Values)-1] + 1
+  #   else:
+  #     end = NPT4Values[(i+1) * numItemsPerRange]
+  #   uniFinder.addRange("NPT4Range", start, end)
 
   uniFinder.close()
