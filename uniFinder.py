@@ -33,22 +33,28 @@ class UniFinder:
           self.data.append(row)
 
 
-  def addNPT4Range(self):
-    range = self.session.write_transaction(self.createNPT4Range)
-    rel = self.session.write_transaction(self.createNPT4Relationship)
+  def addRange(self, label, start, end):
+    range = self.session.write_transaction(self._createRange, label, start, end)
+
+  def addRelationship(self, rangeLabel, matchAttribute, relLabel):
+    rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
 
   @staticmethod
-  def createNPT4Range(tx):
-    query = "CREATE (x:NPT4Range { "
-    query += f'start: -1000, end: 4000'
+  def _createRange(tx, label, start, end):
+    query = f"CREATE (x: {label} "
+    query += "{ "
+    query += f'start: {start}, end: {end}'
     query += " }) RETURN x"
     result = tx.run(query)
     return result.single()
 
   @staticmethod
-  def createNPT4Relationship(tx):
-    query = "MATCH (a:University), (b:NPT4Range) WHERE a.NPT4 >= b.start AND a.NPT4 <= b.end "
-    query += "CREATE (a)-[r:NPT4Rel { NPT4: a.NPT4 } ]->(b) RETURN type(r)"
+  def _createRelationship(tx, rangeLabel, matchAttribute, relLabel):
+    query = f"MATCH (a:University), (b:{rangeLabel}) WHERE a.{matchAttribute} >= b.start AND a.{matchAttribute} < b.end "
+    query += f"CREATE (a)-[r:{relLabel} "
+    query += "{ " 
+    query += f"{matchAttribute}: a.{matchAttribute} "
+    query += "} ]->(b) RETURN type(r)"
     result = tx.run(query)
     return result.consume()
 
@@ -92,5 +98,7 @@ uniFinder = UniFinder(neoURL, neoUser, neoPassword)
 # uniFinder.readData(fileName)
 # for i in range(len(uniFinder.data)):
 #   uniFinder.add_uni(i)
-uniFinder.addNPT4Range()
+for i in range (22):
+  uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
+uniFinder.addRelationship("NPT4Range", "NPT4", "NPT4Rel")
 uniFinder.close()
