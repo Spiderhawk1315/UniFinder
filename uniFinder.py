@@ -32,8 +32,30 @@ class UniFinder:
             continue
           self.data.append(row)
 
+
+  def addNPT4Range(self):
+    range = self.session.write_transaction(self.createNPT4Range)
+    rel = self.session.write_transaction(self.createNPT4Relationship)
+
+  @staticmethod
+  def createNPT4Range(tx):
+    query = "CREATE (x:NPT4Range { "
+    query += f'start: -1000, end: 4000'
+    query += " }) RETURN x"
+    result = tx.run(query)
+    return result.single()
+
+  @staticmethod
+  def createNPT4Relationship(tx):
+    query = "MATCH (a:University), (b:NPT4Range) WHERE a.NPT4 >= b.start AND a.NPT4 <= b.end "
+    query += "CREATE (a)-[r:NPT4Rel { NPT4: a.NPT4 } ]->(b) RETURN type(r)"
+    result = tx.run(query)
+    return result.consume()
+
+
   def add_uni(self, rowIndex):
     uni = self.session.write_transaction(self._create_and_return_uni, self.columns, self.data[rowIndex])
+
 
   @staticmethod
   def _create_and_return_uni(tx, columns, data):
@@ -58,6 +80,7 @@ class UniFinder:
     result = tx.run(query)
     return result.single()
 
+
   def close(self):
     # Don't forget to close the session
     self.session.close()
@@ -66,7 +89,8 @@ class UniFinder:
 
 
 uniFinder = UniFinder(neoURL, neoUser, neoPassword)
-uniFinder.readData(fileName)
-for i in range(len(uniFinder.data)):
-  uniFinder.add_uni(i)
+# uniFinder.readData(fileName)
+# for i in range(len(uniFinder.data)):
+#   uniFinder.add_uni(i)
+uniFinder.addNPT4Range()
 uniFinder.close()
