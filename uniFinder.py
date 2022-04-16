@@ -9,125 +9,126 @@ neoPassword = "cZWVr8MUErrFaJlXy88rKXMkwBAaWrdnkgV6B1-vfHg"
 fileName = "uni_data.csv"
 
 class UniFinder:
-  # Indexes of columns that contain string values (for _createAndReturnUni())
+  # Indexes of columns that contain string values (see _createAndReturnUni())
   stringColumns = [COL.INSTNM.value, COL.CITY.value, COL.STABBR.value, COL.ZIP.value]
 
-  def __init__(self, uri, user, password):
+  def __init__(self, uri: str, user: str, password: str):
     self.driver = GraphDatabase.driver(uri, auth=(user, password))
     self.session = self.driver.session()
     self.data = []
     self.columns = []
 
-  def readData(self, fileName):
+  def readData(self, fileName: str):
     with open(fileName, newline='') as csvfile:
       reader = csv.reader(csvfile)
-      isColumns = True
-      for row in reader:
-        if (isColumns):
+      for index, row in enumerate(reader):
+        # Store column row separate from data rows
+        if (index == 0):
           self.columns = row
-          isColumns = False
-        else:
-          # Filter out closed universities
-          if (row[COL.CURROPER.value] == '0'):
-            continue
-          self.data.append(row)
-
-  def addUni(self, rowIndex):
-    uni = self.session.write_transaction(self._createAndReturnUni, self.columns, self.data[rowIndex])
-    return uni
+          continue
+        # Filter out closed universities
+        if (row[COL.CURROPER.value] == '0'):
+          continue
+        self.data.append(row)
 
   @staticmethod
-  def _createAndReturnUni(tx, columns, data):
+  def _createAndReturnUni(tx, columns: list[str], data: list):
     query = "CREATE (x:University { "
     for index, field in enumerate(columns):
       value = data[index]
-
       # Merge NPT4_PUB/NPT4_PRIV into NPT4
+      ## TODO: Merge columns in preprocessing?
       if (field == COL.NPT4_PUB.name or field == COL.NPT4_PRIV.name):
         field = "NPT4"
         if (value == "NULL"):
           continue
-      
       # If field has string value it needs wrapped in quotes for Neo4j
       if (index in UniFinder.stringColumns):
         value = f'"{value}"'
-      
       query += f'{field}: {value}'
-
-      # Comma after every field value pair except the last one
+      # A comma after the last field value pair would cause an error
       if (index < len(columns) - 1):
         query += ", "
-
     query += " }) RETURN x"
     result = tx.run(query)
     return result.single()
 
-  def addRange(self, label, start, end):
-    range = self.session.write_transaction(self._createRange, label, start, end)
-    return range
+  # rowIndex = File row number - 1 [see readData()]
+  def addUni(self, rowIndex: int):
+    uni = self.session.write_transaction(self._createAndReturnUni, self.columns, self.data[rowIndex])
+    return uni
+
+  def addAllUniversities(self):
+    for i in range(len(self.data)):
+      uniFinder.addUni(i)
 
   @staticmethod
-  def _createRange(tx, label, start, end):
-    query = f"CREATE (x: {label} "
-    query += "{ "
+  def _createRange(tx, label: str, start, end):
+    query = f"CREATE (x:{label}" + " { "
     query += f'start: {start}, end: {end}'
     query += " }) RETURN x"
     result = tx.run(query)
     return result.single()
 
-  def addRelationship(self, rangeLabel, matchAttribute, relLabel):
+  def addRange(self, label: str, start, end):
+    rangeNode = self.session.write_transaction(self._createRange, label, start, end)
+    return rangeNode
+
+  def addRangesForCol(self, colName: COL, rangeLabel: str, rangeCount: int =10):
+    values = []
+    for row in range(len(self.data)):
+      value = self.data[row][colName.value]
+      # TODO: Merge columns in preprocessing and replace colName with colIndex
+      if (colName == COL.NPT4_PUB or colName == COL.NPT4_PRIV):
+        value = self.data[row][COL.NPT4_PUB.value] if self.data[row][COL.NPT4_PRIV.value] == "NULL" else self.data[row][COL.NPT4_PRIV.value]
+      if (value == "NULL"):
+        continue
+      value = int(value) # TODO: Account for decimal values
+      values.append(value)
+    values.sort() # Ascending order
+    # Create ranges with roughly equal numbers of items
+    numItemsPerRange = int(len(values)/rangeCount)
+    for i in range(rangeCount):
+      start = values[i * numItemsPerRange]
+      end = values[(i+1) * numItemsPerRange]
+      # Ensure largest value is last range's end
+      if (i == rangeCount-1):
+        end = values[len(values)-1] + 1
+      self.addRange(rangeLabel, start, end)
+
+  # Creates a relationship between all universities whose matchAttribute
+  ## is within rangeLabel's start (inclusive) and end (exclusive) 
+  @staticmethod
+  def _createRelationship(tx, rangeLabel: str, matchAttribute: str, relLabel: str):
+    query = f"MATCH (a:University), (b:{rangeLabel}) "
+    query += f"WHERE a.{matchAttribute} >= b.start AND a.{matchAttribute} < b.end "
+    query += f"CREATE (a)-[r:{relLabel}" + " { " 
+    query += f"{matchAttribute}: a.{matchAttribute}" + " } " 
+    query += "]->(b) RETURN type(r)"
+    result = tx.run(query)
+    return result.consume()
+    
+  def addRelationship(self, rangeLabel: str, matchAttribute: str, relLabel: str):
     rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
     return rel
 
-  @staticmethod
-  def _createRelationship(tx, rangeLabel, matchAttribute, relLabel):
-    query = f"MATCH (a:University), (b:{rangeLabel}) WHERE a.{matchAttribute} >= b.start AND a.{matchAttribute} < b.end "
-    query += f"CREATE (a)-[r:{relLabel} "
-    query += "{ " 
-    query += f"{matchAttribute}: a.{matchAttribute} "
-    query += "} ]->(b) RETURN type(r)"
-    result = tx.run(query)
-    return result.consume()
-
   def close(self):
     # Don't forget to close the session
-    self.session.close()
+    self.session.close() 
     # Don't forget to close the driver connection when you are finished with it
     self.driver.close()
 
 
 if __name__ == '__main__':
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
-  
   uniFinder.readData(fileName)
+  # uniFinder.addAllUniversities()
 
-  # for i in range(len(uniFinder.data)):
-  #   uniFinder.addUni(i)
+  # # for i in range(22):
+  # #   uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
 
-  # for i in range(22):
-  #   uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
-
-  uniFinder.addRelationship("NPT4Range", "NPT4", "NPT4Rel")
-
-  # rangeCount = 10
-  # rowCount = len(uniFinder.data)
-  # NPT4Values = []
-  # for row in range(rowCount):
-  #   NPT4Value = uniFinder.data[row][COL.NPT4_PUB.value] if uniFinder.data[row][COL.NPT4_PRIV.value] == "NULL" else uniFinder.data[row][COL.NPT4_PRIV.value]
-  #   if (NPT4Value == "NULL"):
-  #     continue
-  #   else:
-  #     NPT4Value = int(NPT4Value)
-  #   NPT4Values.append(NPT4Value)
-  # NPT4Values.sort()
-
-  # numItemsPerRange = int(len(NPT4Values)/rangeCount)
-  # for i in range(rangeCount):
-  #   start = NPT4Values[i * numItemsPerRange]
-  #   if (i == rangeCount-1):
-  #     end = NPT4Values[len(NPT4Values)-1] + 1
-  #   else:
-  #     end = NPT4Values[(i+1) * numItemsPerRange]
-  #   uniFinder.addRange("NPT4Range", start, end)
-
+  # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
+  # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
+  uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
+  uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INsRel")
   uniFinder.close()
