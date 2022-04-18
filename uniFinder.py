@@ -112,6 +112,30 @@ class UniFinder:
     rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
     return rel
 
+  # Ranges entirely contained within query start and end, no pruning necessary
+  @staticmethod
+  def _encompassedRanges(tx, rangeLabel, start, end):
+    query = f"MATCH (a:{rangeLabel})-[r:NPT4Rel]-(b:University) "
+    query += f"WHERE (a.start >= {start} AND a.end < {end}) "
+    query += "RETURN a, r"
+    result = tx.run(query)
+    return result.graph()
+
+  @staticmethod
+  def _overlappingRanges(tx, rangeLabel, start, end):
+    query = f"MATCH (a:{rangeLabel})-[r:NPT4Rel]-(b:University) "
+    query += f"WHERE (a.start <= {start} AND a.end > {start}) OR "
+    query += f"(a.start <= {end} AND a.end > {end}) "
+    query += "RETURN a, r"
+    result = tx.run(query)
+    return result.graph()
+    #return [record.data() for record in result]
+
+  def processQuery(self, rangeLabel, start, end):
+    encompassedRanges = self.session.read_transaction(self._encompassedRanges, rangeLabel, start, end)
+    overlappingRanges = self.session.read_transaction(self._overlappingRanges, rangeLabel, start, end)
+    return encompassedRanges, overlappingRanges
+
   def close(self):
     # Don't forget to close the session
     self.session.close() 
@@ -122,13 +146,29 @@ class UniFinder:
 if __name__ == '__main__':
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
   uniFinder.readData(fileName)
-  # uniFinder.addAllUniversities()
+  #uniFinder.addAllUniversities()
 
   # # for i in range(22):
   # #   uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
 
   # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
   # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
-  uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
-  uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INsRel")
+  
+  # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
+  # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INsRel")
+
+  query = ("NPT4Range", 5000, 10000)
+  encompassed, overlapping = uniFinder.processQuery(query[0], query[1], query[2])
+  print("Encompassed")
+  for node in encompassed.nodes:
+    print("id %s labels %s props %s" % (node.id, node.labels, node.items()))
+  for rel in encompassed.relationships:
+    # nodes contains start_id, end_id, and labels of the start/end node if they were returned from the query, so we should just need
+    # rel.nodes and rel.props
+    print("id %s type %s nodes %s start_id %s end_id %s props %s" % (rel.id, rel.type, rel.nodes, rel.start_node.id, rel.end_node.id, rel.items()))
+  # print("Overlapping")
+  # for rel in overlapping.relationships:
+  #   print("id %s type %s start_id %s end_id %s props %s" % (rel.id, rel.type, rel.start_node.id, rel.end_node.id, rel.items()))
+
+
   uniFinder.close()
