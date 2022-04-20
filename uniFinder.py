@@ -17,6 +17,7 @@ class UniFinder:
     self.session = self.driver.session()
     self.data = []
     self.columns = []
+    self.queryResult = None
 
   def readData(self, fileName: str):
     with open(fileName, newline='') as csvfile:
@@ -186,6 +187,11 @@ def main():
     value = rel.get(query[0])
     if (value >= query[1] and value < query[2]):
       unisWithinQueryDict[rel.nodes[0].id] = value
+
+  # uniResultNodes = []
+  # for uniID, value in unisWithinQueryDict.items():
+  #   uniResultNodes += uniFinder.getNodeByID(uniID)
+  #self.queryResult
 
   uniFinder.addRange("User" + query[0] + "Range", query[1], query[2])
   uniFinder.addVirtualRelationships(query[0], unisWithinQueryDict)
