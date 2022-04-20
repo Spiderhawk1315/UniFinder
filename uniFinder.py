@@ -109,6 +109,7 @@ class UniFinder:
   def addVirtualRelationships(self, property: str, uniDict: dict):
     rangeLabel = "User" + property + "Range"
     relLabel = "User" + property + "Rel"
+    rel = None
     for uniID, value in uniDict.items():
       rel = self.session.write_transaction(self._createVirtualRelationship, rangeLabel, relLabel, uniID, value)
     return rel
@@ -124,6 +125,10 @@ class UniFinder:
     query += "]->(b) RETURN type(r)"
     result = tx.run(query)
     return result.consume()
+
+  def addRelationship(self, rangeLabel: str, matchAttribute: str, relLabel: str):
+    rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
+    return rel
 
   # Ranges entirely contained within query start and end, no pruning necessary
   @staticmethod
@@ -166,10 +171,10 @@ def main():
   # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
   # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
   
-  # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
-  # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INsRel")
+  uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
+  uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
 
-  query = ("NPT4", 5000, 10000)
+  query = ("TUITIONFEE_IN", 15000, 20000)
   encompassed, overlapping = uniFinder.processQuery(query[0], query[1], query[2])
   unisWithinQueryDict = dict()
   for rel in encompassed.relationships:
