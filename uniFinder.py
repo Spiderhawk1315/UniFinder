@@ -60,7 +60,7 @@ class UniFinder:
 
   def addAllUniversities(self):
     for i in range(len(self.data)):
-      uniFinder.addUni(i)
+      self.addUni(i)
 
   @staticmethod
   def _createRange(tx, label: str, start, end):
@@ -83,7 +83,7 @@ class UniFinder:
         value = self.data[row][COL.NPT4_PUB.value] if self.data[row][COL.NPT4_PRIV.value] == "NULL" else self.data[row][COL.NPT4_PRIV.value]
       if (value == "NULL"):
         continue
-      value = int(value) # TODO: Account for decimal values
+      value = int(value) # TODO: Account for decimal values (cast to double and see if n/e to int?)
       values.append(value)
     values.sort() # Ascending order
     # Create ranges with roughly equal numbers of items
@@ -96,6 +96,23 @@ class UniFinder:
         end = values[len(values)-1] + 1
       self.addRange(rangeLabel, start, end)
 
+  @staticmethod
+  def _createVirtualRelationship(tx, rangeLabel, relLabel, uniID, value):
+    query = f"MATCH (a:University), (b:{rangeLabel}) "
+    query += f"WHERE ID(a) = {uniID} "
+    query += f"CREATE (a)-[r:{relLabel}" + " { " 
+    query += f"NPT4: {value}" + " } " 
+    query += "]->(b) RETURN type(r)"
+    result = tx.run(query)
+    return result.single()
+
+  def addVirtualRelationships(self, property: str, uniDict: dict):
+    rangeLabel = "User" + property + "Range"
+    relLabel = "User" + property + "Rel"
+    for uniID, value in uniDict.items():
+      rel = self.session.write_transaction(self._createVirtualRelationship, rangeLabel, relLabel, uniID, value)
+    return rel
+
   # Creates a relationship between all universities whose matchAttribute
   ## is within rangeLabel's start (inclusive) and end (exclusive) 
   @staticmethod
@@ -107,23 +124,19 @@ class UniFinder:
     query += "]->(b) RETURN type(r)"
     result = tx.run(query)
     return result.consume()
-    
-  def addRelationship(self, rangeLabel: str, matchAttribute: str, relLabel: str):
-    rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
-    return rel
 
   # Ranges entirely contained within query start and end, no pruning necessary
   @staticmethod
-  def _encompassedRanges(tx, rangeLabel, start, end):
-    query = f"MATCH (a:{rangeLabel})-[r:NPT4Rel]-(b:University) "
+  def _encompassedRanges(tx, property, start, end):
+    query = f"MATCH (a:{property + 'Range'})-[r:{property + 'Rel'}]-(b:University) "
     query += f"WHERE (a.start >= {start} AND a.end < {end}) "
     query += "RETURN a, r"
     result = tx.run(query)
     return result.graph()
 
   @staticmethod
-  def _overlappingRanges(tx, rangeLabel, start, end):
-    query = f"MATCH (a:{rangeLabel})-[r:NPT4Rel]-(b:University) "
+  def _overlappingRanges(tx, property, start, end):
+    query = f"MATCH (a:{property + 'Range'})-[r:{property + 'Rel'}]-(b:University) "
     query += f"WHERE (a.start <= {start} AND a.end > {start}) OR "
     query += f"(a.start <= {end} AND a.end > {end}) "
     query += "RETURN a, r"
@@ -131,9 +144,9 @@ class UniFinder:
     return result.graph()
     #return [record.data() for record in result]
 
-  def processQuery(self, rangeLabel, start, end):
-    encompassedRanges = self.session.read_transaction(self._encompassedRanges, rangeLabel, start, end)
-    overlappingRanges = self.session.read_transaction(self._overlappingRanges, rangeLabel, start, end)
+  def processQuery(self, property, start, end):
+    encompassedRanges = self.session.read_transaction(self._encompassedRanges, property, start, end)
+    overlappingRanges = self.session.read_transaction(self._overlappingRanges, property, start, end)
     return encompassedRanges, overlappingRanges
 
   def close(self):
@@ -142,8 +155,7 @@ class UniFinder:
     # Don't forget to close the driver connection when you are finished with it
     self.driver.close()
 
-
-if __name__ == '__main__':
+def main():
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
   uniFinder.readData(fileName)
   #uniFinder.addAllUniversities()
@@ -157,18 +169,24 @@ if __name__ == '__main__':
   # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
   # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INsRel")
 
-  query = ("NPT4Range", 5000, 10000)
+  query = ("NPT4", 5000, 10000)
   encompassed, overlapping = uniFinder.processQuery(query[0], query[1], query[2])
-  print("Encompassed")
-  for node in encompassed.nodes:
-    print("id %s labels %s props %s" % (node.id, node.labels, node.items()))
+  unisWithinQueryDict = dict()
   for rel in encompassed.relationships:
-    # nodes contains start_id, end_id, and labels of the start/end node if they were returned from the query, so we should just need
-    # rel.nodes and rel.props
-    print("id %s type %s nodes %s start_id %s end_id %s props %s" % (rel.id, rel.type, rel.nodes, rel.start_node.id, rel.end_node.id, rel.items()))
-  # print("Overlapping")
-  # for rel in overlapping.relationships:
-  #   print("id %s type %s start_id %s end_id %s props %s" % (rel.id, rel.type, rel.start_node.id, rel.end_node.id, rel.items()))
+    # print("id %s type %s nodes %s props %s" % (rel.id, rel.type, rel.nodes, rel.items()))
+    unisWithinQueryDict[rel.nodes[0].id] = rel.get(query[0])
 
+  # print("Overlapping")
+  for rel in overlapping.relationships:
+    value = rel.get(query[0])
+    if (value >= query[1] and value < query[2]):
+      unisWithinQueryDict[rel.nodes[0].id] = value
+
+  uniFinder.addRange("User" + query[0] + "Range", query[1], query[2])
+  uniFinder.addVirtualRelationships(query[0], unisWithinQueryDict)
 
   uniFinder.close()
+
+
+if __name__ == '__main__':
+  main()
