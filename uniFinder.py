@@ -1,4 +1,5 @@
 import csv
+from datetime import datetime
 from neo4j import GraphDatabase
 from colNames import COL 
 
@@ -98,21 +99,28 @@ class UniFinder:
       self.addRange(rangeLabel, start, end)
 
   @staticmethod
-  def _createVirtualRelationship(tx, rangeLabel, relLabel, uniID, value):
-    query = f"MATCH (a:University), (b:{rangeLabel}) "
-    query += f"WHERE ID(a) = {uniID} "
+  def _createVirtualRelationship(tx, rangeLabel, relLabel, unisList):
+    query = f"UNWIND ["
+    for index, uniDict in enumerate(unisList):
+      query += "{"
+      query += f"id: {uniDict['id']}, value: {uniDict['value']}"
+      if (index == len(unisList) - 1):
+        query += "} "
+      else:
+        query += "}, "
+    query += "] AS uni "
+    query += f"MATCH (a:University), (b:{rangeLabel}) "
+    query += f"WHERE ID(a) = uni.id "
     query += f"CREATE (a)-[r:{relLabel}" + " { " 
-    query += f"NPT4: {value}" + " } " 
-    query += "]->(b) RETURN type(r)"
+    query += f"NPT4: uni.value" + " } " 
+    query += "]->(b)"
     result = tx.run(query)
     return result.single()
 
-  def addVirtualRelationships(self, property: str, uniDict: dict):
+  def addVirtualRelationships(self, property: str, unisList: list[dict]):
     rangeLabel = "User" + property + "Range"
     relLabel = "User" + property + "Rel"
-    rel = None
-    for uniID, value in uniDict.items():
-      rel = self.session.write_transaction(self._createVirtualRelationship, rangeLabel, relLabel, uniID, value)
+    rel = self.session.write_transaction(self._createVirtualRelationship, rangeLabel, relLabel, unisList)
     return rel
 
   # Creates a relationship between all universities whose matchAttribute
@@ -150,10 +158,21 @@ class UniFinder:
     return result.graph()
     #return [record.data() for record in result]
 
-  def processQuery(self, property, start, end):
+  def processQuery(self, property: str, start, end):
     encompassedRanges = self.session.read_transaction(self._encompassedRanges, property, start, end)
     overlappingRanges = self.session.read_transaction(self._overlappingRanges, property, start, end)
     return encompassedRanges, overlappingRanges
+
+  @staticmethod
+  def _detachDeleteQuery(tx, property):
+    query = f"MATCH (x:{'User' + property + 'Range'}) "
+    query += "DETACH DELETE x"
+    result = tx.run(query)
+    return result.single()
+    
+  def detachDeleteQuery(self, property: str):
+    deleted = self.session.read_transaction(self._detachDeleteQuery, property)
+    return deleted
 
   def close(self):
     # Don't forget to close the session
@@ -161,40 +180,48 @@ class UniFinder:
     # Don't forget to close the driver connection when you are finished with it
     self.driver.close()
 
+
+def getQuery():
+  property = input("Enter the name of a numeric property: ")
+  start = float(input("Enter the start of the range: "))
+  end = float(input("Enter the end of the range: "))
+  return property, start, end
+
 def main():
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
   uniFinder.readData(fileName)
   #uniFinder.addAllUniversities()
 
-  # # for i in range(22):
-  # #   uniFinder.addRange("NPT4Range", i * 5000 - 2000, i * 5000 + 3000)
-
   # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
   # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
-  
-  uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
-  uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
+  # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
+  # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
 
-  query = ("TUITIONFEE_IN", 15000, 20000)
-  encompassed, overlapping = uniFinder.processQuery(query[0], query[1], query[2])
-  unisWithinQueryDict = dict()
+  # query = ("TUITIONFEE_IN", 15000, 20000)
+  queryProp, queryStart, queryEnd = getQuery()
+  dictStart = datetime.now()
+  encompassed, overlapping = uniFinder.processQuery(queryProp, queryStart, queryEnd)
+  unisList = []
   for rel in encompassed.relationships:
-    # print("id %s type %s nodes %s props %s" % (rel.id, rel.type, rel.nodes, rel.items()))
-    unisWithinQueryDict[rel.nodes[0].id] = rel.get(query[0])
+    unisList.append({'id': rel.nodes[0].id, 'value': rel.get(queryProp)})
 
-  # print("Overlapping")
   for rel in overlapping.relationships:
-    value = rel.get(query[0])
-    if (value >= query[1] and value < query[2]):
-      unisWithinQueryDict[rel.nodes[0].id] = value
-
+    uniValue = rel.get(queryProp)
+    if (uniValue >= queryStart and uniValue < queryEnd):
+      unisList.append({'id': rel.nodes[0].id, 'value': uniValue})
+  dictElapsed = datetime.now() - dictStart
   # uniResultNodes = []
   # for uniID, value in unisWithinQueryDict.items():
   #   uniResultNodes += uniFinder.getNodeByID(uniID)
   #self.queryResult
 
-  uniFinder.addRange("User" + query[0] + "Range", query[1], query[2])
-  uniFinder.addVirtualRelationships(query[0], unisWithinQueryDict)
+  uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
+  start = datetime.now()
+  uniFinder.addVirtualRelationships(queryProp, unisList)
+  elapsed = datetime.now() - start
+  print(elapsed + dictElapsed)
+  delete = input("Press enter to delete the query nodes: ")
+  uniFinder.detachDeleteQuery(queryProp)
 
   uniFinder.close()
 
