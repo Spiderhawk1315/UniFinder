@@ -100,14 +100,15 @@ class UniFinder:
 
   @staticmethod
   def _createVirtualRelationship(tx, rangeLabel, relLabel, unisList):
-    query = f"UNWIND ["
-    for index, uniDict in enumerate(unisList):
-      query += "{"
-      query += f"id: {uniDict['id']}, value: {uniDict['value']}"
-      if (index == len(unisList) - 1):
-        query += "} "
-      else:
-        query += "}, "
+    newlist = [f"{{ id: {uni['id']}, value: {uni['value']} }}" for uni in unisList]
+
+    query = f"UNWIND [{', '.join(newlist)}"
+    # for index, uniDict in enumerate(unisList):
+    #   query += f"{{id: {uniDict['id']}, value: {uniDict['value']}"
+    #   if (index == len(unisList) - 1):
+    #     query += "} "
+    #   else:
+    #     query += "}, "
     query += "] AS uni "
     query += f"MATCH (a:University), (b:{rangeLabel}) "
     query += f"WHERE ID(a) = uni.id "
@@ -217,6 +218,7 @@ def main():
 
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
   start = datetime.now()
+  #uniFinder.addRelationship()
   uniFinder.addVirtualRelationships(queryProp, unisList)
   elapsed = datetime.now() - start
   print(elapsed + dictElapsed)
