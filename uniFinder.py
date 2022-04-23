@@ -1,5 +1,6 @@
 import csv
-from datetime import datetime
+import random
+import time
 from neo4j import GraphDatabase
 from colNames import COL 
 
@@ -66,9 +67,7 @@ class UniFinder:
 
   @staticmethod
   def _createRange(tx, label: str, start, end):
-    query = f"CREATE (x:{label}" + " { "
-    query += f'start: {start}, end: {end}'
-    query += " }) RETURN x"
+    query = f"CREATE (x:{label} {{ start: {start}, end: {end} }}) RETURN x"
     result = tx.run(query)
     return result.single()
 
@@ -99,29 +98,19 @@ class UniFinder:
       self.addRange(rangeLabel, start, end)
 
   @staticmethod
-  def _createVirtualRelationship(tx, rangeLabel, relLabel, unisList):
-    newlist = [f"{{ id: {uni['id']}, value: {uni['value']} }}" for uni in unisList]
-
-    query = f"UNWIND [{', '.join(newlist)}"
-    # for index, uniDict in enumerate(unisList):
-    #   query += f"{{id: {uniDict['id']}, value: {uniDict['value']}"
-    #   if (index == len(unisList) - 1):
-    #     query += "} "
-    #   else:
-    #     query += "}, "
-    query += "] AS uni "
+  def _createVirtualRelationship(tx, property, rangeLabel, relLabel, unisList):
+    cypherList = [f"{{ id: {uni['id']}, value: {uni['value']} }}" for uni in unisList]
+    query = f"UNWIND [{', '.join(cypherList)}] AS uni "
     query += f"MATCH (a:University), (b:{rangeLabel}) "
     query += f"WHERE ID(a) = uni.id "
-    query += f"CREATE (a)-[r:{relLabel}" + " { " 
-    query += f"NPT4: uni.value" + " } " 
-    query += "]->(b)"
+    query += f"CREATE (a)-[r:{relLabel} {{ {property}: uni.value }}]->(b)"
     result = tx.run(query)
     return result.single()
 
   def addVirtualRelationships(self, property: str, unisList: list[dict]):
     rangeLabel = "User" + property + "Range"
     relLabel = "User" + property + "Rel"
-    rel = self.session.write_transaction(self._createVirtualRelationship, rangeLabel, relLabel, unisList)
+    rel = self.session.write_transaction(self._createVirtualRelationship, property, rangeLabel, relLabel, unisList)
     return rel
 
   # Creates a relationship between all universities whose matchAttribute
@@ -130,9 +119,8 @@ class UniFinder:
   def _createRelationship(tx, rangeLabel: str, matchAttribute: str, relLabel: str):
     query = f"MATCH (a:University), (b:{rangeLabel}) "
     query += f"WHERE a.{matchAttribute} >= b.start AND a.{matchAttribute} < b.end "
-    query += f"CREATE (a)-[r:{relLabel}" + " { " 
-    query += f"{matchAttribute}: a.{matchAttribute}" + " } " 
-    query += "]->(b) RETURN type(r)"
+    query += f"CREATE (a)-[r:{relLabel} {{ {matchAttribute}: a.{matchAttribute} }}]->(b) "
+    query += "RETURN type(r)"
     result = tx.run(query)
     return result.consume()
 
@@ -157,7 +145,6 @@ class UniFinder:
     query += "RETURN a, r"
     result = tx.run(query)
     return result.graph()
-    #return [record.data() for record in result]
 
   def processQuery(self, property: str, start, end):
     encompassedRanges = self.session.read_transaction(self._encompassedRanges, property, start, end)
@@ -188,42 +175,83 @@ def getQuery():
   end = float(input("Enter the end of the range: "))
   return property, start, end
 
+def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
+  uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
+  start = time.time()
+  encompassed, overlapping = uniFinder.processQuery(queryProp, queryStart, queryEnd)
+  unisList = []
+  for rel in encompassed.relationships:
+    unisList.append({'id': rel.nodes[0].id, 'value': rel.get(queryProp)})
+  for rel in overlapping.relationships:
+    uniValue = rel.get(queryProp)
+    if (uniValue >= queryStart and uniValue < queryEnd):
+      unisList.append({'id': rel.nodes[0].id, 'value': uniValue})
+  uniFinder.addVirtualRelationships(queryProp, unisList)
+  elapsed = time.time() - start
+  uniFinder.detachDeleteQuery(queryProp)
+  return elapsed
+
+def naiveMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
+  uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
+  start = time.time()
+  uniFinder.addRelationship(matchAttribute=queryProp, rangeLabel="User"+queryProp+"Range", relLabel="User"+queryProp+"Rel")
+  elapsed = time.time() - start
+  uniFinder.detachDeleteQuery(queryProp)
+  return elapsed
+
+def evaluate(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd, trials: int):
+  ourTimes, naiveTimes = [], []
+  for i in range(trials):
+    ourTimes.append(ourMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
+    naiveTimes.append(naiveMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
+  return ourTimes, naiveTimes
+
+def evalRunner(uniFinder: UniFinder, queries: list[dict], trials: int) -> list[dict]:
+  results = []
+  for query in queries:
+    ourTimes, naiveTimes = evaluate(uniFinder=uniFinder, queryProp=query["queryProp"], queryStart=query["queryStart"], queryEnd=query["queryEnd"], trials=trials)
+    ourTotal, naiveTotal = 0, 0
+    for i in range(trials):
+      ourTotal += ourTimes[i]
+      naiveTotal += naiveTimes[i]
+    ourAvg = ourTotal/trials
+    naiveAvg = naiveTotal/trials
+    results.append({"query": query, "ourAvg": ourAvg, "naiveAvg": naiveAvg, "ourTimes": ourTimes, "naiveTimes": naiveTimes})
+  return results
+
 def main():
   uniFinder = UniFinder(neoURL, neoUser, neoPassword)
   uniFinder.readData(fileName)
-  #uniFinder.addAllUniversities()
+
+  # uniFinder.addAllUniversities()
 
   # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
   # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
   # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
   # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
 
-  # query = ("TUITIONFEE_IN", 15000, 20000)
-  queryProp, queryStart, queryEnd = getQuery()
-  dictStart = datetime.now()
-  encompassed, overlapping = uniFinder.processQuery(queryProp, queryStart, queryEnd)
-  unisList = []
-  for rel in encompassed.relationships:
-    unisList.append({'id': rel.nodes[0].id, 'value': rel.get(queryProp)})
+  # queries = [{"queryProp": "NPT4", "queryStart": 69, "queryEnd": 420}, {"queryProp": "NPT4", "queryStart": 5000, "queryEnd": 10000}]
+  queries = []
+  for i in range(5):
+    start = random.randint(-1368, 106645 - 1)
+    end = random.randint(start + 1, 106645 + 1)
+    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
 
-  for rel in overlapping.relationships:
-    uniValue = rel.get(queryProp)
-    if (uniValue >= queryStart and uniValue < queryEnd):
-      unisList.append({'id': rel.nodes[0].id, 'value': uniValue})
-  dictElapsed = datetime.now() - dictStart
-  # uniResultNodes = []
-  # for uniID, value in unisWithinQueryDict.items():
-  #   uniResultNodes += uniFinder.getNodeByID(uniID)
-  #self.queryResult
-
-  uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
-  start = datetime.now()
-  #uniFinder.addRelationship()
-  uniFinder.addVirtualRelationships(queryProp, unisList)
-  elapsed = datetime.now() - start
-  print(elapsed + dictElapsed)
-  delete = input("Press enter to delete the query nodes: ")
-  uniFinder.detachDeleteQuery(queryProp)
+  trials = 10
+  results = evalRunner(uniFinder=uniFinder, queries=queries, trials=trials)
+  ourAvgTotal, naiveAvgTotal = 0, 0
+  for result in results:
+    print(f"Query: {result['query']}")
+    print(f"Naive method avg time for {trials} trials: {result['naiveAvg']}")
+    print(f"Our method avg time for {trials} trials: {result['ourAvg']}")
+    print()
+    ourAvgTotal += result['ourAvg']
+    naiveAvgTotal += result['naiveAvg']
+  
+  ourAvgOverall = ourAvgTotal/len(queries)
+  naiveAvgOverall = naiveAvgTotal/len(queries)
+  print(f"Naive method avg time for {len(queries)} queries with {trials} trials each: {naiveAvgOverall}")
+  print(f"Our method avg time for {len(queries)} queries with {trials} trials each: {ourAvgOverall}")
 
   uniFinder.close()
 
