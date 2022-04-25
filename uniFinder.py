@@ -173,7 +173,7 @@ def getQuery():
   property = input("Enter the name of a numeric property: ")
   start = float(input("Enter the start of the range: "))
   end = float(input("Enter the end of the range: "))
-  return property, start, end
+  return {"queryProp": property, "queryStart": start, "queryEnd": end}
 
 def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
