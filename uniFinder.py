@@ -84,7 +84,10 @@ class UniFinder:
         value = self.data[row][COL.NPT4_PUB.value] if self.data[row][COL.NPT4_PRIV.value] == "NULL" else self.data[row][COL.NPT4_PRIV.value]
       if (value == "NULL"):
         continue
-      value = int(value) # TODO: Account for decimal values (cast to double and see if n/e to int?)
+      if (type(value) is int):
+        value = int(value)
+      else:
+        value = float(value)
       values.append(value)
     values.sort() # Ascending order
     # Create ranges with roughly equal numbers of items
@@ -126,6 +129,20 @@ class UniFinder:
 
   def addRelationship(self, rangeLabel: str, matchAttribute: str, relLabel: str):
     rel = self.session.write_transaction(self._createRelationship, rangeLabel, matchAttribute, relLabel)
+    return rel
+
+  @staticmethod
+  def _naiveCreateRelationship(tx, property: str):
+    query = f"MATCH (a:University)-[r]-(b:{property+'Range'}) "
+    query += f"MATCH (c:{'User'+property+'Range'}) "
+    query += f"WHERE r.{property} >= c.start AND r.{property} < c.end "
+    query += f"CREATE (a)-[rNew:{'User'+property+'Rel'} {{ {property}: r.{property} }}]->(c) "
+    query += "RETURN type(rNew)"
+    result = tx.run(query)
+    return result.consume()
+
+  def naiveAddRelationship(self, property):
+    rel = self.session.write_transaction(self._naiveCreateRelationship, property)
     return rel
 
   # Ranges entirely contained within query start and end, no pruning necessary
@@ -190,8 +207,9 @@ def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
 def naiveMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
   start = time.time()
-  uniFinder.addRelationship(matchAttribute=queryProp, rangeLabel="User"+queryProp+"Range", relLabel="User"+queryProp+"Rel")
+  uniFinder.naiveAddRelationship(property=queryProp)
   elapsed = time.time() - start
+  #input("enter to delete")
   uniFinder.detachDeleteQuery(queryProp)
   return elapsed
 
@@ -206,12 +224,8 @@ def evalRunner(uniFinder: UniFinder, queries: list[dict], trials: int) -> list[d
   results = []
   for query in queries:
     ourTimes, naiveTimes = evaluate(uniFinder=uniFinder, queryProp=query["queryProp"], queryStart=query["queryStart"], queryEnd=query["queryEnd"], trials=trials)
-    ourTotal, naiveTotal = 0, 0
-    for i in range(trials):
-      ourTotal += ourTimes[i]
-      naiveTotal += naiveTimes[i]
-    ourAvg = ourTotal/trials
-    naiveAvg = naiveTotal/trials
+    ourAvg = sum(ourTimes)/trials
+    naiveAvg = sum(naiveTimes)/trials
     results.append({"query": query, "ourAvg": ourAvg, "naiveAvg": naiveAvg, "ourTimes": ourTimes, "naiveTimes": naiveTimes})
   return results
 
@@ -225,7 +239,10 @@ def main():
   # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
   # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
   # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
+  # uniFinder.addRangesForCol(colName=COL.ADM_RATE, rangeLabel="ADM_RATERange")
+  # uniFinder.addRelationship(rangeLabel="ADM_RATERange", matchAttribute="ADM_RATE", relLabel="ADM_RATERel")
 
+  # queries = [{"queryProp": "ADM_RATE", "queryStart": 0.11, "queryEnd": 0.42}, {"queryProp": "ADM_RATE", "queryStart": .90, "queryEnd": 1}]
   # queries = [{"queryProp": "NPT4", "queryStart": 69, "queryEnd": 420}, {"queryProp": "NPT4", "queryStart": 5000, "queryEnd": 10000}]
   queries = []
   for i in range(5):
