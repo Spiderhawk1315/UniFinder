@@ -179,13 +179,9 @@ def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
   start = time.time()
   encompassed, overlapping = uniFinder.processQuery(queryProp, queryStart, queryEnd)
-  unisList = []
-  for rel in encompassed.relationships:
-    unisList.append({'id': rel.nodes[0].id, 'value': rel.get(queryProp)})
-  for rel in overlapping.relationships:
-    uniValue = rel.get(queryProp)
-    if (uniValue >= queryStart and uniValue < queryEnd):
-      unisList.append({'id': rel.nodes[0].id, 'value': uniValue})
+  encompassedList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in encompassed.relationships]
+  overlappingList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in overlapping.relationships if (rel.get(queryProp) >= queryStart and rel.get(queryProp) < queryEnd)]
+  unisList = encompassedList + overlappingList
   uniFinder.addVirtualRelationships(queryProp, unisList)
   elapsed = time.time() - start
   uniFinder.detachDeleteQuery(queryProp)
