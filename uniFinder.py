@@ -79,7 +79,7 @@ class UniFinder:
     values = []
     for row in range(len(self.data)):
       value = self.data[row][colName.value]
-      # TODO: Merge columns in preprocessing and replace colName with colIndex
+      # TODO: Merge columns in preprocessing and replace colName with colIndex?
       if (colName == COL.NPT4_PUB or colName == COL.NPT4_PRIV):
         value = self.data[row][COL.NPT4_PUB.value] if self.data[row][COL.NPT4_PRIV.value] == "NULL" else self.data[row][COL.NPT4_PRIV.value]
       if (value == "NULL"):
@@ -102,13 +102,14 @@ class UniFinder:
 
   @staticmethod
   def _createVirtualRelationship(tx, property, rangeLabel, relLabel, unisList):
+    # Darn you Python/Neo4j for not accepting the list normally
     cypherList = [f"{{ id: {uni['id']}, value: {uni['value']} }}" for uni in unisList]
     query = f"UNWIND [{', '.join(cypherList)}] AS uni "
     query += f"MATCH (a:University), (b:{rangeLabel}) "
     query += f"WHERE ID(a) = uni.id "
     query += f"CREATE (a)-[r:{relLabel} {{ {property}: uni.value }}]->(b)"
     result = tx.run(query)
-    return result.single()
+    return result.consume()
 
   def addVirtualRelationships(self, property: str, unisList: list[dict]):
     rangeLabel = "User" + property + "Range"
@@ -176,7 +177,7 @@ class UniFinder:
     return result.single()
     
   def detachDeleteQuery(self, property: str):
-    deleted = self.session.read_transaction(self._detachDeleteQuery, property)
+    deleted = self.session.write_transaction(self._detachDeleteQuery, property)
     return deleted
 
   def close(self):
@@ -209,13 +210,17 @@ def naiveMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   start = time.time()
   uniFinder.naiveAddRelationship(property=queryProp)
   elapsed = time.time() - start
-  #input("enter to delete")
   uniFinder.detachDeleteQuery(queryProp)
   return elapsed
 
 def evaluate(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd, trials: int):
   ourTimes, naiveTimes = [], []
   for i in range(trials):
+    # # First one has higher time for some reason... so let's ignore it
+    # if i == 0 or i == trials-1:
+    #   ourMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd)
+    #   naiveMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd)
+    #   continue
     ourTimes.append(ourMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
     naiveTimes.append(naiveMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
   return ourTimes, naiveTimes
@@ -224,8 +229,8 @@ def evalRunner(uniFinder: UniFinder, queries: list[dict], trials: int) -> list[d
   results = []
   for query in queries:
     ourTimes, naiveTimes = evaluate(uniFinder=uniFinder, queryProp=query["queryProp"], queryStart=query["queryStart"], queryEnd=query["queryEnd"], trials=trials)
-    ourAvg = sum(ourTimes)/trials
-    naiveAvg = sum(naiveTimes)/trials
+    ourAvg = sum(ourTimes)/len(ourTimes)
+    naiveAvg = sum(naiveTimes)/len(naiveTimes)
     results.append({"query": query, "ourAvg": ourAvg, "naiveAvg": naiveAvg, "ourTimes": ourTimes, "naiveTimes": naiveTimes})
   return results
 
@@ -244,19 +249,36 @@ def main():
 
   # queries = [{"queryProp": "ADM_RATE", "queryStart": 0.11, "queryEnd": 0.42}, {"queryProp": "ADM_RATE", "queryStart": .90, "queryEnd": 1}]
   # queries = [{"queryProp": "NPT4", "queryStart": 69, "queryEnd": 420}, {"queryProp": "NPT4", "queryStart": 5000, "queryEnd": 10000}]
-  queries = []
-  for i in range(5):
-    start = random.randint(-1368, 106645 - 1)
-    end = random.randint(start + 1, 106645 + 1)
-    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  queries = [{"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 5835+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 8323+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 10604+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 13121+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 15364+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 17499+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 19978+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 22787+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 26809+1000}]
+  # queries = []
+  # for i in range(5):
+  #   start = random.randint(-1368, 106645 - 1)
+  #   end = random.randint(start + 1, 106645 + 1)
+  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+
+  # # Small ranges: 
+  # for i in range(3):
+  #   start = random.randint(-1368, (106645 - 1) - 300)
+  #   end = start + 300
+  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  # # Normal ranges: 2-5k
+  # for i in range(3):
+  #   start = random.randint(-1368, (106645 - 1) - 3000)
+  #   end = start + 3000
+  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  # # Large ranges: 
+  # for i in range(3):
+  #   start = random.randint(-1368, (106645 - 1) - 30000)
+  #   end = start + 30000
+  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
 
   trials = 10
   results = evalRunner(uniFinder=uniFinder, queries=queries, trials=trials)
   ourAvgTotal, naiveAvgTotal = 0, 0
   for result in results:
     print(f"Query: {result['query']}")
-    print(f"Naive method avg time for {trials} trials: {result['naiveAvg']}")
-    print(f"Our method avg time for {trials} trials: {result['ourAvg']}")
+    print(f"Naive method avg time for {trials} trials: {result['naiveAvg']}\nNaive Times: {result['naiveTimes']}")
+    print(f"Our method avg time for {trials} trials: {result['ourAvg']}\nOur Times: {result['ourTimes']}")
     print()
     ourAvgTotal += result['ourAvg']
     naiveAvgTotal += result['naiveAvg']
