@@ -133,6 +133,19 @@ class UniFinder:
     return rel
 
   @staticmethod
+  def _naiveGetUnis(tx, property: str):
+    query = f"MATCH (a:University)-[r]-(b:{property+'Range'}) "
+    query += f"MATCH (c:{'User'+property+'Range'}) "
+    query += f"WHERE r.{property} >= c.start AND r.{property} < c.end "
+    query += "RETURN a"
+    result = tx.run(query)
+    return result.consume()
+
+  def naiveGetUnis(self, property):
+    rel = self.session.write_transaction(self._naiveGetUnis, property)
+    return rel
+
+  @staticmethod
   def _naiveCreateRelationship(tx, property: str):
     query = f"MATCH (a:University)-[r]-(b:{property+'Range'}) "
     query += f"MATCH (c:{'User'+property+'Range'}) "
@@ -200,15 +213,17 @@ def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   encompassedList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in encompassed.relationships]
   overlappingList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in overlapping.relationships if (rel.get(queryProp) >= queryStart and rel.get(queryProp) < queryEnd)]
   unisList = encompassedList + overlappingList
-  uniFinder.addVirtualRelationships(queryProp, unisList)
   elapsed = time.time() - start
+  uniFinder.addVirtualRelationships(queryProp, unisList)
+  # elapsed = time.time() - start
   uniFinder.detachDeleteQuery(queryProp)
   return elapsed
 
 def naiveMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
   start = time.time()
-  uniFinder.naiveAddRelationship(property=queryProp)
+  uniFinder.naiveGetUnis(queryProp)
+  # uniFinder.naiveAddRelationship(property=queryProp)
   elapsed = time.time() - start
   uniFinder.detachDeleteQuery(queryProp)
   return elapsed
