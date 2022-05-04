@@ -63,7 +63,7 @@ class UniFinder:
 
   def addAllUniversities(self):
     for i in range(len(self.data)):
-      self.addUni(i)
+      self.addUni(rowIndex=i)
 
   @staticmethod
   def _createRange(tx, label: str, start, end):
@@ -98,7 +98,7 @@ class UniFinder:
       # Ensure largest value is last range's end
       if (i == rangeCount-1):
         end = values[len(values)-1] + 1
-      self.addRange(rangeLabel, start, end)
+      self.addRange(label=rangeLabel, start=start, end=end)
 
   @staticmethod
   def _createVirtualRelationship(tx, property, rangeLabel, relLabel, unisList):
@@ -117,8 +117,6 @@ class UniFinder:
     rel = self.session.write_transaction(self._createVirtualRelationship, property, rangeLabel, relLabel, unisList)
     return rel
 
-  # Creates a relationship between all universities whose matchAttribute
-  ## is within rangeLabel's start (inclusive) and end (exclusive) 
   @staticmethod
   def _createRelationship(tx, rangeLabel: str, matchAttribute: str, relLabel: str):
     query = f"MATCH (a:University), (b:{rangeLabel}) "
@@ -159,7 +157,6 @@ class UniFinder:
     rel = self.session.write_transaction(self._naiveCreateRelationship, property)
     return rel
 
-  # Ranges entirely contained within query start and end, no pruning necessary
   @staticmethod
   def _encompassedRanges(tx, property, start, end):
     query = f"MATCH (a:{property + 'Range'})-[r:{property + 'Rel'}]-(b:University) "
@@ -207,35 +204,31 @@ def getQuery():
   return {"queryProp": property, "queryStart": start, "queryEnd": end}
 
 def ourMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
-  uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
+  uniFinder.addRange(label="User" + queryProp + "Range", start=queryStart, end=queryEnd)
   start = time.time()
-  encompassed, overlapping = uniFinder.processQuery(queryProp, queryStart, queryEnd)
+  encompassed, overlapping = uniFinder.processQuery(property=queryProp, start=queryStart, end=queryEnd)
+  # Ranges entirely contained within query start and end, no pruning necessary
   encompassedList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in encompassed.relationships]
+  # Only grab edges with values within queried range
   overlappingList = [{'id': rel.nodes[0].id, 'value': rel.get(queryProp)} for rel in overlapping.relationships if (rel.get(queryProp) >= queryStart and rel.get(queryProp) < queryEnd)]
   unisList = encompassedList + overlappingList
   elapsed = time.time() - start
-  uniFinder.addVirtualRelationships(queryProp, unisList)
-  # elapsed = time.time() - start
+  uniFinder.addVirtualRelationships(property=queryProp, unisList=unisList)
   uniFinder.detachDeleteQuery(queryProp)
   return elapsed
 
 def naiveMethod(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd):
   uniFinder.addRange("User" + queryProp + "Range", queryStart, queryEnd)
   start = time.time()
-  uniFinder.naiveGetUnis(queryProp)
-  # uniFinder.naiveAddRelationship(property=queryProp)
+  uniFinder.naiveGetUnis(property=queryProp)
   elapsed = time.time() - start
-  uniFinder.detachDeleteQuery(queryProp)
+  uniFinder.naiveAddRelationship(property=queryProp)
+  uniFinder.detachDeleteQuery(property=queryProp)
   return elapsed
 
 def evaluate(uniFinder: UniFinder, queryProp: str, queryStart, queryEnd, trials: int):
   ourTimes, naiveTimes = [], []
   for i in range(trials):
-    # # First one has higher time for some reason... so let's ignore it
-    # if i == 0 or i == trials-1:
-    #   ourMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd)
-    #   naiveMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd)
-    #   continue
     ourTimes.append(ourMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
     naiveTimes.append(naiveMethod(uniFinder=uniFinder, queryProp=queryProp, queryStart=queryStart, queryEnd=queryEnd))
   return ourTimes, naiveTimes
@@ -249,45 +242,52 @@ def evalRunner(uniFinder: UniFinder, queries: list[dict], trials: int) -> list[d
     results.append({"query": query, "ourAvg": ourAvg, "naiveAvg": naiveAvg, "ourTimes": ourTimes, "naiveTimes": naiveTimes})
   return results
 
-def main():
-  uniFinder = UniFinder(neoURL, neoUser, neoPassword)
-  uniFinder.readData(fileName)
 
-  # uniFinder.addAllUniversities()
+def initDatabase(uniFinder: UniFinder):
+  uniFinder.addAllUniversities()
 
-  # uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
-  # uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
+  uniFinder.addRangesForCol(colName=COL.NPT4_PUB, rangeLabel="NPT4Range")
+  uniFinder.addRelationship(rangeLabel="NPT4Range", matchAttribute="NPT4", relLabel="NPT4Rel")
   # uniFinder.addRangesForCol(colName=COL.TUITIONFEE_IN, rangeLabel="TUITIONFEE_INRange")
   # uniFinder.addRelationship(rangeLabel="TUITIONFEE_INRange", matchAttribute="TUITIONFEE_IN", relLabel="TUITIONFEE_INRel")
   # uniFinder.addRangesForCol(colName=COL.ADM_RATE, rangeLabel="ADM_RATERange")
   # uniFinder.addRelationship(rangeLabel="ADM_RATERange", matchAttribute="ADM_RATE", relLabel="ADM_RATERel")
 
-  # queries = [{"queryProp": "ADM_RATE", "queryStart": 0.11, "queryEnd": 0.42}, {"queryProp": "ADM_RATE", "queryStart": .90, "queryEnd": 1}]
-  # queries = [{"queryProp": "NPT4", "queryStart": 69, "queryEnd": 420}, {"queryProp": "NPT4", "queryStart": 5000, "queryEnd": 10000}]
+def getRandomNPT4Queries(numQueries: int):
+  queries = []
+  for i in range(numQueries):
+    start = random.randint(-1368, 106645 - 1)
+    end = random.randint(start + 1, 106645 + 1)
+    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  return queries
+
+def getSmallMedLargeQueries():
+  queries = []
+  # Small ranges: 
+  for i in range(3):
+    start = random.randint(-1368, (106645 - 1) - 300)
+    end = start + 300
+    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  # Normal ranges: 2-5k
+  for i in range(3):
+    start = random.randint(-1368, (106645 - 1) - 3000)
+    end = start + 3000
+    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  # Large ranges: 
+  for i in range(3):
+    start = random.randint(-1368, (106645 - 1) - 30000)
+    end = start + 30000
+    queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
+  return queries
+
+def main():
+  uniFinder = UniFinder(neoURL, neoUser, neoPassword)
+  uniFinder.readData(fileName)
+  initDatabase(uniFinder=uniFinder)
+  # Queries with ~550, ~1100, ..., items per range
   queries = [{"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 5835+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 8323+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 10604+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 13121+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 15364+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 17499+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 19978+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 22787+1000}, {"queryProp": "NPT4", "queryStart": -1368, "queryEnd": 26809+1000}]
-  # queries = []
-  # for i in range(5):
-  #   start = random.randint(-1368, 106645 - 1)
-  #   end = random.randint(start + 1, 106645 + 1)
-  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
 
-  # # Small ranges: 
-  # for i in range(3):
-  #   start = random.randint(-1368, (106645 - 1) - 300)
-  #   end = start + 300
-  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
-  # # Normal ranges: 2-5k
-  # for i in range(3):
-  #   start = random.randint(-1368, (106645 - 1) - 3000)
-  #   end = start + 3000
-  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
-  # # Large ranges: 
-  # for i in range(3):
-  #   start = random.randint(-1368, (106645 - 1) - 30000)
-  #   end = start + 30000
-  #   queries.append({"queryProp": "NPT4", "queryStart": start, "queryEnd": end})
-
-  trials = 10
+  trials = 100
   results = evalRunner(uniFinder=uniFinder, queries=queries, trials=trials)
   ourAvgTotal, naiveAvgTotal = 0, 0
   for result in results:
@@ -296,8 +296,7 @@ def main():
     print(f"Our method avg time for {trials} trials: {result['ourAvg']}\nOur Times: {result['ourTimes']}")
     print()
     ourAvgTotal += result['ourAvg']
-    naiveAvgTotal += result['naiveAvg']
-  
+    naiveAvgTotal = naiveAvgTotal + result['naiveAvg']
   ourAvgOverall = ourAvgTotal/len(queries)
   naiveAvgOverall = naiveAvgTotal/len(queries)
   print(f"Naive method avg time for {len(queries)} queries with {trials} trials each: {naiveAvgOverall}")
